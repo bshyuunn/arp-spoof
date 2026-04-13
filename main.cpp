@@ -157,7 +157,9 @@ int main(int argc, char* argv[]) {
 
 	char* dev = param.dev_;
 	char errbuf[PCAP_ERRBUF_SIZE];
-	pcap_t* pcap = pcap_open_live(dev, BUFSIZ, 1, 1, errbuf);
+	// jumbo frame 대응을 위해 snaplen을 IP 패킷 최대 크기로 설정
+	// https://datatracker.ietf.org/doc/html/rfc791#section-3.1 - Total Length: 16 bits (max 65535)
+	pcap_t* pcap = pcap_open_live(dev, 65535, 1, 1, errbuf);
 	if (pcap == nullptr) {
 		fprintf(stderr, "couldn't open device %s(%s)\n", dev, errbuf);
 		return EXIT_FAILURE;
