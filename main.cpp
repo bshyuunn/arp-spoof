@@ -20,6 +20,13 @@ void usage() {
 	printf("sample : arp-spoof enp6s0 192.168.200.163 192.168.200.254\n");
 }
 
+struct Flow {
+	Ip senderIp;
+	Mac senderMac;
+	Ip targetIp;
+	Mac targetMac;
+};
+
 struct Param {
 	char* dev_; // 인터페이스 이름
 	std::vector<std::pair<Ip, Ip>> pairs_; // (sender IP, target IP) 쌍 목록 
@@ -143,6 +150,8 @@ int main(int argc, char* argv[]) {
 	printf("Attacker MAC: %s\n", std::string(attackerMac).c_str());
 	printf("Attacker IP: %s\n", std::string(attackerIp).c_str());
 
+	std::vector<Flow> flows;
+
 	for (int i = 0; i < param.pairs_.size(); i++) {
 		Ip senderIp = param.pairs_[i].first;
 		Ip targetIp = param.pairs_[i].second;
@@ -176,6 +185,8 @@ int main(int argc, char* argv[]) {
 		if (res != 0) {
 			fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(pcap));
 		}
+
+		flows.push_back({senderIp, senderMac, targetIp, targetMac});
 	}
 
 	pcap_close(pcap);
