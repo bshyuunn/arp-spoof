@@ -189,5 +189,27 @@ int main(int argc, char* argv[]) {
 		flows.push_back({senderIp, senderMac, targetIp, targetMac});
 	}
 
+	// 6. 패킷 캡처 루프
+	while (true) {
+		struct pcap_pkthdr* header;
+		const u_char* pkt;
+		int ret = pcap_next_ex(pcap, &header, &pkt);
+		if (ret == 0) continue;
+		if (ret == PCAP_ERROR || ret == PCAP_ERROR_BREAK) {
+			fprintf(stderr, "pcap_next_ex error: %s\n", pcap_geterr(pcap));
+			break; // 실패시 바로 break
+		}
+
+		EthHdr* ethHdr = (EthHdr*)pkt;
+		if (ethHdr->type() != EthHdr::Ip4) continue;
+		if (ethHdr->dmac() != attackerMac) continue;
+
+		for (const Flow& flow : flows) {
+			if (ethHdr->smac() != flow.senderMac) continue;
+			printf("Spoofed packet detected from %s\n", std::string(flow.senderIp).c_str());
+			break;
+		}
+	}
+
 	pcap_close(pcap);
 }
