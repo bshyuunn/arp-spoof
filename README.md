@@ -1,6 +1,7 @@
 ## Demo
 
-[](./arp-spoof.gif)
+![](./arp-spoof.gif)
+
 mp4는 미리보기가 안되어 gif로 첨부합니다.
 
 [원본 영상 mp4](/arp-spoof.mp4)
