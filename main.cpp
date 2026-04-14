@@ -239,14 +239,13 @@ int main(int argc, char* argv[]) {
 			if (ethHdr->smac() != flow.senderMac) continue;
 
 			// Ethernet 헤더만 변경하여 재전송
-			uint8_t relayPkt[header->caplen];
-			memcpy(relayPkt, pkt, header->caplen);
+			std::vector<uint8_t> relayPkt(pkt, pkt + header->caplen); // VLA 대신 std::vector 사용
 
-			EthHdr* relayEth = (EthHdr*)relayPkt;
+			EthHdr* relayEth = (EthHdr*)relayPkt.data();
 			relayEth->smac_ = attackerMac; // smac은 공격자 MAC 주소
 			relayEth->dmac_ = flow.targetMac; // dmac은 라우터 MAC 주소
 
-			pcap_sendpacket(pcap, relayPkt, header->caplen);
+			pcap_sendpacket(pcap, relayPkt.data(), header->caplen);
 			// printf("%s > relay %d bytes\n", std::string(flow.senderIp).c_str(), header->caplen);
 			break;
 		}
